@@ -91,7 +91,7 @@ class ProcessIrradFile:
         self.df['r2value_Kl2_LR'] = 0
 
         # Calculate K-functions as a negative of the slope of liner regression
-        # with all elements
+        # with all elements, except points in depths at -1.0 and 0.0
         self.df['calculated_Kd_LR_all_points'] = 0
         self.df['calculated_Ku_LR_all_points'] = 0
         self.df['calculated_Kl1_LR_all_points'] = 0
@@ -116,11 +116,14 @@ class ProcessIrradFile:
 
         # init variables
         lmbd = self.df['lambda'].iloc[0]
+
         x = []
+
         log_y_kd = []
         log_y_ku = []
         log_y_kl1 = []
         log_y_kl2 = []
+
         y_kd = []
         y_ku = []
         y_kl1 = []
@@ -131,23 +134,29 @@ class ProcessIrradFile:
 
         for i in range(0, len(self.df)):
 
+            depth = self.df['depth'].iloc[i]
+
             # clear variables in each new lambda
             if lmbd != self.df['lambda'].iloc[i]:
                 lmbd = self.df['lambda'].iloc[i]
                 x = []
+
                 log_y_kd = []
                 log_y_ku = []
                 log_y_kl1 = []
                 log_y_kl2 = []
+
                 y_kd = []
                 y_ku = []
                 y_kl1 = []
                 y_kl2 = []
                 print(f" - Calculate in lambda = {lmbd}")
 
-            # Calculate k-functions
-            if not math.isnan(self.df['depth'].iloc[i]):
+            # Calculate k-functions. When we calculate all points of linear
+            # regression we do not calculate in depths of -1.0 and 0.0
+            if not math.isnan(depth):
                 x.append(self.df['depth'].iloc[i])
+
                 log_y_kd.append(math.log(self.df['calculated_Ed'].iloc[i]))
                 log_y_ku.append(math.log(self.df['calculated_Eu'].iloc[i]))
                 log_y_kl1.append(math.log(self.df['calculated_El1'].iloc[i]))
@@ -166,8 +175,11 @@ class ProcessIrradFile:
                 self.df['r2value_Kd_LR'].iloc[i] = r_value * r_value
 
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
-                    x, log_y_kd)
-                self.df['calculated_Kd_LR_all_points'].iloc[i] = slope * (-1)
+                    x[2:], log_y_kd[2:])
+                if math.isnan(slope):
+                    self.df['calculated_Kd_LR_all_points'].iloc[i] = 0
+                else:
+                    self.df['calculated_Kd_LR_all_points'].iloc[i] = slope*(-1)
                 self.df['r2value_Kd_LR_all_points'].iloc[i] = r_value * r_value
 
                 self.df['calculated_Kd_HL'].iloc[i] = (
@@ -175,6 +187,13 @@ class ProcessIrradFile:
                         x[-1] - x[-2])) * -1
 
             except IndexError:
+                self.df['calculated_Kd_LR'].iloc[i] = 0
+                self.df['r2value_Kd_LR'].iloc[i] = 0
+                self.df['calculated_Kd_LR_all_points'].iloc[i] = 0
+                self.df['r2value_Kd_LR_all_points'].iloc[i] = 0
+                self.df['calculated_Kd_HL'].iloc[i] = 0
+
+            except ValueError:
                 self.df['calculated_Kd_LR'].iloc[i] = 0
                 self.df['r2value_Kd_LR'].iloc[i] = 0
                 self.df['calculated_Kd_LR_all_points'].iloc[i] = 0
@@ -189,8 +208,11 @@ class ProcessIrradFile:
                 self.df['r2value_Ku_LR'].iloc[i] = r_value * r_value
 
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
-                    x, log_y_ku)
-                self.df['calculated_Ku_LR_all_points'].iloc[i] = slope * (-1)
+                    x[2:], log_y_ku[2:])
+                if math.isnan(slope):
+                    self.df['calculated_Ku_LR_all_points'].iloc[i] = 0
+                else:
+                    self.df['calculated_Ku_LR_all_points'].iloc[i] = slope*(-1)
                 self.df['r2value_Ku_LR_all_points'].iloc[i] = r_value*r_value
 
                 self.df['calculated_Ku_HL'].iloc[i] = (
@@ -198,6 +220,13 @@ class ProcessIrradFile:
                         x[-1] - x[-2])) * -1
 
             except IndexError:
+                self.df['calculated_Ku_LR'].iloc[i] = 0
+                self.df['r2value_Ku_LR'].iloc[i] = 0
+                self.df['calculated_Ku_LR_all_points'].iloc[i] = 0
+                self.df['r2value_Ku_LR_all_points'].iloc[i] = 0
+                self.df['calculated_Ku_HL'].iloc[i] = 0
+
+            except ValueError:
                 self.df['calculated_Ku_LR'].iloc[i] = 0
                 self.df['r2value_Ku_LR'].iloc[i] = 0
                 self.df['calculated_Ku_LR_all_points'].iloc[i] = 0
@@ -212,8 +241,12 @@ class ProcessIrradFile:
                 self.df['r2value_Kl1_LR'].iloc[i] = r_value * r_value
 
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
-                    x, log_y_kl1)
-                self.df['calculated_Kl1_LR_all_points'].iloc[i] = slope * (-1)
+                    x[2:], log_y_kl1[2:])
+                if math.isnan(slope):
+                    self.df['calculated_Kl1_LR_all_points'].iloc[i] = 0
+                else:
+                    self.df[
+                        'calculated_Kl1_LR_all_points'].iloc[i] = slope*(-1)
                 self.df['r2value_Kl1_LR_all_points'].iloc[i] = r_value*r_value
 
                 self.df['calculated_Kl1_HL'].iloc[i] = (
@@ -221,6 +254,13 @@ class ProcessIrradFile:
                         x[-1] - x[-2])) * -1
 
             except IndexError:
+                self.df['calculated_Kl1_LR'].iloc[i] = 0
+                self.df['r2value_Kl1_LR'].iloc[i] = 0
+                self.df['calculated_Kl1_LR_all_points'].iloc[i] = 0
+                self.df['r2value_Kl1_LR_all_points'].iloc[i] = 0
+                self.df['calculated_Kl1_HL'].iloc[i] = 0
+
+            except ValueError:
                 self.df['calculated_Kl1_LR'].iloc[i] = 0
                 self.df['r2value_Kl1_LR'].iloc[i] = 0
                 self.df['calculated_Kl1_LR_all_points'].iloc[i] = 0
@@ -235,8 +275,12 @@ class ProcessIrradFile:
                 self.df['r2value_Kl2_LR'].iloc[i] = r_value * r_value
 
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
-                    x, log_y_kl2)
-                self.df['calculated_Kl2_LR_all_points'].iloc[i] = slope * (-1)
+                    x[2:], log_y_kl2[2:])
+                if math.isnan(slope):
+                    self.df['calculated_Kl2_LR_all_points'].iloc[i] = 0
+                else:
+                    self.df[
+                        'calculated_Kl2_LR_all_points'].iloc[i] = slope*(-1)
                 self.df['r2value_Kl2_LR_all_points'].iloc[i] = r_value*r_value
 
                 self.df['calculated_Kl2_HL'].iloc[i] = (
@@ -244,6 +288,13 @@ class ProcessIrradFile:
                         x[-1] - x[-2])) * -1
 
             except IndexError:
+                self.df['calculated_Kl2_LR'].iloc[i] = 0
+                self.df['r2value_Kl2_LR'].iloc[i] = 0
+                self.df['calculated_Kl2_LR_all_points'].iloc[i] = 0
+                self.df['r2value_Kl2_LR_all_points'].iloc[i] = 0
+                self.df['calculated_Kl2_HL'].iloc[i] = 0
+
+            except ValueError:
                 self.df['calculated_Kl2_LR'].iloc[i] = 0
                 self.df['r2value_Kl2_LR'].iloc[i] = 0
                 self.df['calculated_Kl2_LR_all_points'].iloc[i] = 0
