@@ -15,3 +15,4 @@ It calculates Kfunctions in 3 different ways:
 https://github.com/Carlos-Rodero/calculate-irradiances-Hydrolight 
 inside the files/raw folder
 - Results appear in files/csv folder
+- Plots appear in images/matplotlib or images/plotly folder

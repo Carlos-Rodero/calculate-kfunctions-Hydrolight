@@ -1,3 +1,4 @@
 files/raw/Lroot_calculated_irradiances.csv
 files/csv/Lroot_calculated_kfunctions.csv
-images/*
+images/plotly/*
+images/matplotlib/*
