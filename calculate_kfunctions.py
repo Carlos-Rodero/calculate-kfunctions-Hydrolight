@@ -17,6 +17,10 @@ import sys
 import time
 import threading
 import warnings
+import matplotlib.pyplot as plt
+import matplotlib.style as mplstyle
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
 
 class ProcessIrradFile:
@@ -37,11 +41,21 @@ class ProcessIrradFile:
         pd.options.mode.chained_assignment = None
         warnings.filterwarnings("ignore")
 
-    def open_file(self):
+    def open_file(self, file_name=None, path_file=None):
         """
         Open file and get content of file
+
+        Parameters
+        ----------
+            file_name: str
+                Name of the file (Default=None)
+            path_file: str
+                Path of the file (Default=None)
         """
-        f = os.path.join(self.path_files_raw, self.file_name)
+        if file_name is None:
+            f = os.path.join(self.path_files_raw, self.file_name)
+        else:
+            f = os.path.join(path_file, file_name)
         try:
             with open(f, 'r') as file:
                 self.content = file.read()
@@ -302,7 +316,7 @@ class ProcessIrradFile:
                 self.df['calculated_Kl2_HL'].iloc[i] = 0
 
         # save as csv
-        fname = f"{self.file_name.split('.')[0]}_calculated_kfunctions.csv"
+        fname = "Lroot_calculated_kfunctions.csv"
         f = os.path.join(self.path_files_csv, fname)
         self.df.to_csv(f)
 
@@ -317,6 +331,971 @@ class ProcessIrradFile:
         print("\nComplete. ")
         print(f"Time calculating kfunctions: {(end - start)/60} minutes")
 
+    def _create_dataframe_from_Lroot_calc_kfunctions(self):
+        """
+        Create dataframe from content file
+        """
+        # Create dataframe from content of .csv file
+        self.df = pd.read_csv(io.StringIO(self.content), header=0,
+                              skipinitialspace=True, index_col=0)
+
+    def wavelength_to_rgb(self, wavelength, gamma=0.8):
+        ''' taken from http://www.noah.org/wiki/Wavelength_to_RGB_in_Python
+        This converts a given wavelength of light to an
+        approximate RGB color value. The wavelength must be given
+        in nanometers in the range from 380 nm through 750 nm
+        (789 THz through 400 THz).
+
+        Based on code by Dan Bruton
+        http://www.physics.sfasu.edu/astro/color/spectra.html
+        Additionally alpha value set to 0.5 outside range
+        '''
+        wavelength = float(wavelength)
+        if wavelength >= 380 and wavelength <= 750:
+            A = 1.
+        else:
+            A = 0.5
+        if wavelength < 380:
+            wavelength = 380.
+        if wavelength > 750:
+            wavelength = 750.
+        if wavelength >= 380 and wavelength <= 440:
+            attenuation = 0.3 + 0.7 * (wavelength - 380) / (440 - 380)
+            R = ((-(wavelength - 440) / (440 - 380)) * attenuation) ** gamma
+            G = 0.0
+            B = (1.0 * attenuation) ** gamma
+        elif wavelength >= 440 and wavelength <= 490:
+            R = 0.0
+            G = ((wavelength - 440) / (490 - 440)) ** gamma
+            B = 1.0
+        elif wavelength >= 490 and wavelength <= 510:
+            R = 0.0
+            G = 1.0
+            B = (-(wavelength - 510) / (510 - 490)) ** gamma
+        elif wavelength >= 510 and wavelength <= 580:
+            R = ((wavelength - 510) / (580 - 510)) ** gamma
+            G = 1.0
+            B = 0.0
+        elif wavelength >= 580 and wavelength <= 645:
+            R = 1.0
+            G = (-(wavelength - 645) / (645 - 580)) ** gamma
+            B = 0.0
+        elif wavelength >= 645 and wavelength <= 750:
+            attenuation = 0.3 + 0.7 * (750 - wavelength) / (750 - 645)
+            R = (1.0 * attenuation) ** gamma
+            G = 0.0
+            B = 0.0
+        else:
+            R = 0.0
+            G = 0.0
+            B = 0.0
+        return (R, G, B, A)
+
+    def plot_irradiances_matplotlib(self, has_show=False):
+        """
+        Plot calculated Irradiances from .csv file in Matplotlib
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+        """
+        mplstyle.use(['ggplot'])
+
+        # plot of calculated_Ed for each lambda in function of depth
+        # in matplotlib
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+        fig.subplots_adjust(right=0.8)
+        fig.suptitle("Calculated Irradiances", fontsize=12)
+
+        for i, df in self.df.groupby(['lambda']):
+
+            lmbda = f'lambda: {i}'
+            color = self.wavelength_to_rgb(wavelength=i)
+
+            ax1.invert_yaxis()
+            ax1.set_xlabel('Irradiance Ed (W/m^2 nm)', fontsize=8)
+            ax1.set_ylabel('depth (m)', fontsize=8)
+            ax1.grid(True, alpha=0.3)
+            ax1.plot(
+                df['calculated_Ed'].iloc[1:], df['depth'].iloc[1:],
+                label=lmbda, color=color)[0]
+            ax1.set_title('calculated_Ed', size=10)
+
+            ax2.invert_yaxis()
+            ax2.set_xlabel('Irradiance Eu (W/m^2 nm)', fontsize=8)
+            ax2.set_ylabel('depth (m)', fontsize=8)
+            ax2.grid(True, alpha=0.3)
+            ax2.plot(
+                df['calculated_Eu'].iloc[1:], df['depth'].iloc[1:],
+                label=lmbda, color=color)[0]
+            ax2.set_title('calculated_Eu', size=10)
+
+            ax3.invert_yaxis()
+            ax3.set_xlabel('Irradiance El1 (W/m^2 nm)', fontsize=8)
+            ax3.set_ylabel('depth (m)', fontsize=8)
+            ax3.grid(True, alpha=0.3)
+            ax3.plot(
+                df['calculated_El1'].iloc[1:], df['depth'].iloc[1:],
+                label=lmbda, color=color)[0]
+            ax3.set_title('calculated_El1', size=10)
+
+            ax4.invert_yaxis()
+            ax4.set_xlabel('Irradiance El2 (W/m^2 nm)', fontsize=8)
+            ax4.set_ylabel('depth (m)', fontsize=8)
+            ax4.grid(True, alpha=0.3)
+            ax4.plot(
+                df['calculated_El2'].iloc[1:], df['depth'].iloc[1:],
+                label=lmbda, color=color)[0]
+            ax4.set_title('calculated_El2', size=10)
+
+        handles, labels = ax2.get_legend_handles_labels()
+
+        # Create the legend
+        fig.legend(
+            handles, labels,
+            bbox_to_anchor=(1.0, 0.5),
+            loc='center right',
+            title="wavelength",
+            borderaxespad=0.5,
+            fontsize=8
+            )
+
+        fig.tight_layout(rect=[0, 0.03, 0.80, 0.95])
+
+        if not os.path.exists("images/matplotlib"):
+            os.mkdir("images/matplotlib")
+
+        plt.savefig(
+            fname="images/matplotlib/calculated_irradiances.svg",
+            )
+
+        if has_show is True:
+            plt.show()
+
+    def plot_irradiances_plotly(self, has_show=False):
+        """
+        calculated Irradiances from .csv file in Plotly
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        # plot of calculated_Ed for each lambda in function of depth in plotly
+        # Initialize figure with subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            column_widths=[0.5, 0.5],
+            row_heights=[0.5, 0.5],
+            subplot_titles=("calculated_Ed", "calculated_Eu", "calculated_El1",
+                            "calculated_El2"))
+
+        for i, df in self.df.groupby(['lambda']):
+            lmbda = f'lambda: {i}'
+            color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
+
+            # Add scatter plot of irradiances
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Ed'].iloc[1:],
+                    y=df['depth'].iloc[1:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    marker=dict(color=color),
+                    text=df['calculated_Ed'].iloc[1:]),
+                row=1, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Eu'].iloc[1:],
+                    y=df['depth'].iloc[1:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Eu'].iloc[1:]),
+                row=1, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_El1'].iloc[1:],
+                    y=df['depth'].iloc[1:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_El1'].iloc[1:]),
+                row=2, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_El2'].iloc[1:],
+                    y=df['depth'].iloc[1:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_El2'].iloc[1:]),
+                row=2, col=2
+                )
+
+        # Update xaxis properties
+        fig.update_xaxes(
+            title_text="Irradiance Ed (W/m^2 nm)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=1)
+        fig.update_xaxes(
+            title_text="Irradiance Eu (W/m^2 nm)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=2)
+        fig.update_xaxes(
+            title_text="Irradiance El1 (W/m^2 nm)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=1)
+        fig.update_xaxes(
+            title_text="Irradiance El2 (W/m^2 nm)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(
+            title_text='depth (m)',
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            autorange='reversed')
+
+        # Update title and height
+        fig.update_layout(
+            title_text="<b>Calculated Irradiances</b>",
+            title_font=dict(size=16),
+            title=dict(
+                y=0.97,
+                x=0.5,
+                xanchor='center',
+                yanchor="top"),
+            legend_title='<b> wavelength </b>',
+            legend=dict(
+                traceorder="normal",
+                y=1,
+                x=1.1,
+                yanchor="top",
+                font=dict(
+                    family="sans-serif",
+                    size=9,
+                    color="black"
+                ),
+            )
+        )
+        if has_show is True:
+            fig.show()
+
+        if not os.path.exists("images/plotly"):
+            os.mkdir("images/plotly")
+        fig.write_image("images/plotly/calculated_irradiances.svg")
+        fig.write_html("images/plotly/calculated_irradiances.html")
+
+    def plot_kfunctionsLR_matplotlib(self, has_show=False):
+        """
+        Plot kfunctions calculated as Linear Regression
+        from .csv file in Matplotlib
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        mplstyle.use(['ggplot'])
+
+        # plot of calculated_Ed for each lambda in function of depth
+        # in matplotlib
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+        fig.subplots_adjust(right=0.8)
+        fig.suptitle("Calculated kfunctions LR", fontsize=12)
+
+        for i, df in self.df.groupby(['lambda']):
+
+            lmbda = f'lambda: {i}'
+            color = self.wavelength_to_rgb(wavelength=i)
+
+            ax1.invert_yaxis()
+            ax1.set_xlabel('calculated kfunction Kd (1/meter)', fontsize=8)
+            ax1.set_ylabel('depth (m)', fontsize=8)
+            ax1.grid(True, alpha=0.3)
+            ax1.plot(
+                df['calculated_Kd_LR'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax1.set_title('calculated_Kd_LR', size=10)
+
+            ax2.invert_yaxis()
+            ax2.set_xlabel('calculated kfunction Ku (1/meter)', fontsize=8)
+            ax2.set_ylabel('depth (m)', fontsize=8)
+            ax2.grid(True, alpha=0.3)
+            ax2.plot(
+                df['calculated_Ku_LR'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax2.set_title('calculated_Ku_LR', size=10)
+
+            ax3.invert_yaxis()
+            ax3.set_xlabel('calculated kfunction Kl1 (1/meter)', fontsize=8)
+            ax3.set_ylabel('depth (m)', fontsize=8)
+            ax3.grid(True, alpha=0.3)
+            ax3.plot(
+                df['calculated_Kl1_LR'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax3.set_title('calculated_Kl1_LR', size=10)
+
+            ax4.invert_yaxis()
+            ax4.set_xlabel('calculated kfunction Kl2 (1/meter)', fontsize=8)
+            ax4.set_ylabel('depth (m)', fontsize=8)
+            ax4.grid(True, alpha=0.3)
+            ax4.plot(
+                df['calculated_Kl2_LR'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax4.set_title('calculated_Kl2_LR', size=10)
+
+        handles, labels = ax2.get_legend_handles_labels()
+
+        # Create the legend
+        fig.legend(
+            handles, labels,
+            bbox_to_anchor=(1.0, 0.5),
+            loc='center right',
+            title="wavelength",
+            borderaxespad=0.5,
+            fontsize=8
+            )
+
+        fig.tight_layout(rect=[0, 0.03, 0.80, 0.95])
+
+        if not os.path.exists("images/matplotlib"):
+            os.mkdir("images/matplotlib")
+
+        plt.savefig(
+            fname="images/matplotlib/calculated_kfunctions_LR.svg",
+            )
+
+        if has_show is True:
+            plt.show()
+
+    def plot_kfunctionsLR_plotly(self, has_show=False):
+        """
+        Plot kfunctions calculated as Linear Regression
+        from .csv file in Plotly
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        # plot of calculated_Ed for each lambda in function of depth in plotly
+        # Initialize figure with subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            column_widths=[0.5, 0.5],
+            row_heights=[0.5, 0.5],
+            subplot_titles=("calculated_Kd_LR", "calculated_Ku_LR",
+                            "calculated_Kl1_LR", "calculated_Kl2_LR"))
+
+        for i, df in self.df.groupby(['lambda']):
+            lmbda = f'lambda: {i}'
+            color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
+
+            # Add scatter plot of irradiances
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kd_LR'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    marker=dict(color=color),
+                    text=df['calculated_Kd_LR'].iloc[2:]),
+                row=1, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Ku_LR'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Ku_LR'].iloc[2:]),
+                row=1, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl1_LR'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl1_LR'].iloc[2:]),
+                row=2, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl2_LR'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl2_LR'].iloc[2:]),
+                row=2, col=2
+                )
+
+        # Update xaxis properties
+        fig.update_xaxes(
+            title_text="calculated kfunction Kd (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Ku (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl1 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl2 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(
+            title_text='depth (m)',
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            autorange='reversed')
+
+        # Update title and height
+        fig.update_layout(
+            title_text="<b>Calculated kfunctions LR</b>",
+            title_font=dict(size=16),
+            title=dict(
+                y=0.97,
+                x=0.5,
+                xanchor='center',
+                yanchor="top"),
+            legend_title='<b> Wavelength </b>',
+            legend=dict(
+                traceorder="normal",
+                y=1,
+                x=1.1,
+                yanchor="top",
+                font=dict(
+                    family="sans-serif",
+                    size=9,
+                    color="black"
+                ),
+            )
+        )
+        if has_show is True:
+            fig.show()
+
+        if not os.path.exists("images/plotly"):
+            os.mkdir("images/plotly")
+        fig.write_image("images/plotly/calculated_kfunctions_LR.svg")
+        fig.write_html("images/plotly/calculated_kfunctions_LR.html")
+
+    def plot_calculated_Kd_LR_all_points_matplotlib(self, has_show=False):
+        """
+        Plot kfunctions calculated as Linear Regression with all points
+        from .csv file in Matplotlib
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        mplstyle.use(['ggplot'])
+
+        # plot of calculated_Ed for each lambda in function of depth
+        # in matplotlib
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+        fig.subplots_adjust(right=0.8)
+        fig.suptitle("Calculated kfunctions LR all points", fontsize=12)
+
+        for i, df in self.df.groupby(['lambda']):
+
+            lmbda = f'lambda: {i}'
+            color = self.wavelength_to_rgb(wavelength=i)
+
+            ax1.invert_yaxis()
+            ax1.set_xlabel('calculated kfunction Kd (1/meter)', fontsize=8)
+            ax1.set_ylabel('depth (m)', fontsize=8)
+            ax1.grid(True, alpha=0.3)
+            ax1.plot(
+                df['calculated_Kd_LR_all_points'].iloc[3:],
+                df['depth'].iloc[3:],
+                label=lmbda, color=color)[0]
+            ax1.set_title('calculated_Kd_LR_all_points', size=10)
+
+            ax2.invert_yaxis()
+            ax2.set_xlabel('calculated kfunction Ku (1/meter)', fontsize=8)
+            ax2.set_ylabel('depth (m)', fontsize=8)
+            ax2.grid(True, alpha=0.3)
+            ax2.plot(
+                df['calculated_Ku_LR_all_points'].iloc[3:],
+                df['depth'].iloc[3:],
+                label=lmbda, color=color)[0]
+            ax2.set_title('calculated_Ku_LR_all_points', size=10)
+
+            ax3.invert_yaxis()
+            ax3.set_xlabel('calculated kfunction Kl1 (1/meter)', fontsize=8)
+            ax3.set_ylabel('depth (m)', fontsize=8)
+            ax3.grid(True, alpha=0.3)
+            ax3.plot(
+                df['calculated_Kl1_LR_all_points'].iloc[3:],
+                df['depth'].iloc[3:],
+                label=lmbda, color=color)[0]
+            ax3.set_title('calculated_Kl1_LR_all_points', size=10)
+
+            ax4.invert_yaxis()
+            ax4.set_xlabel('calculated kfunction Kl2 (1/meter)', fontsize=8)
+            ax4.set_ylabel('depth (m)', fontsize=8)
+            ax4.grid(True, alpha=0.3)
+            ax4.plot(
+                df['calculated_Kl2_LR_all_points'].iloc[3:],
+                df['depth'].iloc[3:],
+                label=lmbda, color=color)[0]
+            ax4.set_title('calculated_Kl2_LR_all_points', size=10)
+
+        handles, labels = ax2.get_legend_handles_labels()
+
+        # Create the legend
+        fig.legend(
+            handles, labels,
+            bbox_to_anchor=(1.0, 0.5),
+            loc='center right',
+            title="wavelength",
+            borderaxespad=0.5,
+            fontsize=8
+            )
+
+        fig.tight_layout(rect=[0, 0.03, 0.80, 0.95])
+
+        if not os.path.exists("images/matplotlib"):
+            os.mkdir("images/matplotlib")
+
+        plt.savefig(
+            fname="images/matplotlib/calculated_kfunctions_LR_all_points.svg",
+            )
+
+        if has_show is True:
+            plt.show()
+
+    def plot_calculated_Kd_LR_all_points_plotly(self, has_show=False):
+        """
+        Plot kfunctions calculated as Linear Regression with all points
+        from .csv file in Plotly
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        # plot of calculated_Ed for each lambda in function of depth in plotly
+        # Initialize figure with subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            column_widths=[0.5, 0.5],
+            row_heights=[0.5, 0.5],
+            subplot_titles=("calculated_Kd_LR_all_points",
+                            "calculated_Ku_LR_all_points",
+                            "calculated_Kl1_LR_all_points",
+                            "calculated_Kl2_LR_all_points"))
+
+        for i, df in self.df.groupby(['lambda']):
+            lmbda = f'lambda: {i}'
+            color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
+
+            # Add scatter plot of irradiances
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kd_LR_all_points'].iloc[3:],
+                    y=df['depth'].iloc[3:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    marker=dict(color=color),
+                    text=df['calculated_Kd_LR_all_points'].iloc[3:]),
+                row=1, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Ku_LR_all_points'].iloc[3:],
+                    y=df['depth'].iloc[3:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Ku_LR_all_points'].iloc[3:]),
+                row=1, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl1_LR_all_points'].iloc[3:],
+                    y=df['depth'].iloc[3:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl1_LR_all_points'].iloc[3:]),
+                row=2, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl2_LR_all_points'].iloc[3:],
+                    y=df['depth'].iloc[3:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl2_LR_all_points'].iloc[3:]),
+                row=2, col=2
+                )
+
+        # Update xaxis properties
+        fig.update_xaxes(
+            title_text="calculated kfunction Kd (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Ku (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl1 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl2 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(
+            title_text='depth (m)',
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            autorange='reversed')
+
+        # Update title and height
+        fig.update_layout(
+            title_text="<b>Calculated kfunctions LR all points</b>",
+            title_font=dict(size=16),
+            title=dict(
+                y=0.97,
+                x=0.5,
+                xanchor='center',
+                yanchor="top"),
+            legend_title='<b> Wavelength </b>',
+            legend=dict(
+                traceorder="normal",
+                y=1,
+                x=1.1,
+                yanchor="top",
+                font=dict(
+                    family="sans-serif",
+                    size=9,
+                    color="black"
+                ),
+            )
+        )
+
+        if has_show is True:
+            fig.show()
+
+        if not os.path.exists("images/plotly"):
+            os.mkdir("images/plotly")
+        fig.write_image(
+            "images/plotly/calculated_kfunctions_LR_all_points.svg")
+        fig.write_html(
+            "images/plotly/calculated_kfunctions_LR_all_points.html")
+
+    def plot_calculated_Kd_HL_matplotlib(self, has_show=False):
+        """
+        Plot kfunctions calculated as Hydrolight
+        from .csv file in Matplotlib
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        mplstyle.use(['ggplot'])
+
+        # plot of calculated_Ed for each lambda in function of depth
+        # in matplotlib
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(nrows=2, ncols=2)
+        fig.subplots_adjust(right=0.8)
+        fig.suptitle("Calculated kfunctions HL", fontsize=12)
+
+        for i, df in self.df.groupby(['lambda']):
+
+            lmbda = f'lambda: {i}'
+            color = self.wavelength_to_rgb(wavelength=i)
+
+            ax1.invert_yaxis()
+            ax1.set_xlabel('calculated kfunction Kd (1/meter)', fontsize=8)
+            ax1.set_ylabel('depth (m)', fontsize=8)
+            ax1.grid(True, alpha=0.3)
+            ax1.plot(
+                df['calculated_Kd_HL'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax1.set_title('calculated_Kd_HL', size=10)
+
+            ax2.invert_yaxis()
+            ax2.set_xlabel('calculated kfunction Ku (1/meter)', fontsize=8)
+            ax2.set_ylabel('depth (m)', fontsize=8)
+            ax2.grid(True, alpha=0.3)
+            ax2.plot(
+                df['calculated_Ku_HL'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax2.set_title('calculated_Ku_HL', size=10)
+
+            ax3.invert_yaxis()
+            ax3.set_xlabel('calculated kfunction Kl1 (1/meter)', fontsize=8)
+            ax3.set_ylabel('depth (m)', fontsize=8)
+            ax3.grid(True, alpha=0.3)
+            ax3.plot(
+                df['calculated_Kl1_HL'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax3.set_title('calculated_Kl1_HL', size=10)
+
+            ax4.invert_yaxis()
+            ax4.set_xlabel('calculated kfunction Kl2 (1/meter)', fontsize=8)
+            ax4.set_ylabel('depth (m)', fontsize=8)
+            ax4.grid(True, alpha=0.3)
+            ax4.plot(
+                df['calculated_Kl2_HL'].iloc[2:], df['depth'].iloc[2:],
+                label=lmbda, color=color)[0]
+            ax4.set_title('calculated_Kl2_HL', size=10)
+
+        handles, labels = ax2.get_legend_handles_labels()
+
+        # Create the legend
+        fig.legend(
+            handles, labels,
+            bbox_to_anchor=(1.0, 0.5),
+            loc='center right',
+            title="wavelength",
+            borderaxespad=0.5,
+            fontsize=8
+            )
+
+        fig.tight_layout(rect=[0, 0.03, 0.80, 0.95])
+
+        if not os.path.exists("images/matplotlib"):
+            os.mkdir("images/matplotlib")
+
+        plt.savefig(
+            fname="images/matplotlib/calculated_kfunctions_HL.svg",
+            )
+
+        if has_show is True:
+            plt.show()
+
+    def plot_calculated_Kd_HL_plotly(self, has_show=False):
+        """
+        Plot kfunctions calculated as Linear Regression with all points
+        from .csv file in Plotly
+
+        Parameters
+        ----------
+            has_show: Boolean
+                Flag to show the plot. By default, False.
+
+        """
+        # plot of calculated_Ed for each lambda in function of depth in plotly
+        # Initialize figure with subplots
+        fig = make_subplots(
+            rows=2, cols=2,
+            column_widths=[0.5, 0.5],
+            row_heights=[0.5, 0.5],
+            subplot_titles=("calculated_Kd_HL",
+                            "calculated_Ku_HL",
+                            "calculated_Kl1_HL",
+                            "calculated_Kl2_HL"))
+
+        for i, df in self.df.groupby(['lambda']):
+            lmbda = f'lambda: {i}'
+            color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
+
+            # Add scatter plot of irradiances
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kd_HL'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    marker=dict(color=color),
+                    text=df['calculated_Kd_HL'].iloc[2:]),
+                row=1, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Ku_HL'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Ku_HL'].iloc[2:]),
+                row=1, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl1_HL'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl1_HL'].iloc[2:]),
+                row=2, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl2_HL'].iloc[2:],
+                    y=df['depth'].iloc[2:],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl2_HL'].iloc[2:]),
+                row=2, col=2
+                )
+
+        # Update xaxis properties
+        fig.update_xaxes(
+            title_text="calculated kfunction Kd (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Ku (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=1, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl1 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl2 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            row=2, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(
+            title_text='depth (m)',
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            autorange='reversed')
+
+        # Update title and height
+        fig.update_layout(
+            title_text="<b>Calculated kfunctions LH</b>",
+            title_font=dict(size=16),
+            title=dict(
+                y=0.97,
+                x=0.5,
+                xanchor='center',
+                yanchor="top"),
+            legend_title='<b> Wavelength </b>',
+            legend=dict(
+                traceorder="normal",
+                y=1,
+                x=1.1,
+                yanchor="top",
+                font=dict(
+                    family="sans-serif",
+                    size=9,
+                    color="black"
+                ),
+            )
+        )
+
+        if has_show is True:
+            fig.show()
+
+        if not os.path.exists("images/plotly"):
+            os.mkdir("images/plotly")
+        fig.write_image("images/plotly/calculated_kfunctions_LH.svg")
+        fig.write_html("images/plotly/calculated_kfunctions_LH.html")
+
     def animated_loading(self, process_name=""):
         chars = r"/—\|"
         for char in chars:
@@ -328,6 +1307,26 @@ class ProcessIrradFile:
 if __name__ == "__main__":
 
     prf = ProcessIrradFile()
-    prf.open_file()
+    """ prf.open_file()
     prf.create_dataframe_from_Lroot_calc_irrad()
-    prf.calculate_kfunctions()
+    prf.calculate_kfunctions() """
+
+    # Flag to show or hide plot
+    has_show = True
+
+    prf.open_file(
+        file_name="Lroot_calculated_kfunctions.csv",
+        path_file="files/csv")
+    prf._create_dataframe_from_Lroot_calc_kfunctions()
+
+    prf.plot_irradiances_matplotlib(has_show=has_show)
+    prf.plot_irradiances_plotly(has_show=has_show)
+
+    prf.plot_kfunctionsLR_matplotlib(has_show=has_show)
+    prf.plot_kfunctionsLR_plotly(has_show=has_show)
+
+    prf.plot_calculated_Kd_LR_all_points_matplotlib(has_show=has_show)
+    prf.plot_calculated_Kd_LR_all_points_plotly(has_show=has_show)
+
+    prf.plot_calculated_Kd_HL_matplotlib(has_show=has_show)
+    prf.plot_calculated_Kd_HL_plotly(has_show=has_show)
