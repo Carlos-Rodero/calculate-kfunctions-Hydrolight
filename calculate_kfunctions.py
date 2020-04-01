@@ -4,13 +4,14 @@ Created on Fri Jan 10 10:11:00 2020
 
 @author: Carlos Rodero García
 
-Process file "Lroot_calculated_irradiances" obtained in
+Module to process file "Lroot_calculated_irradiances" obtained in
 calculate-irradiances-Hydrolight script to obtain kfunctions (Kd, Ku or Kl).
 
 """
 import os
 import pandas as pd
 from scipy import stats
+import numpy as np
 import io
 import math
 import sys
@@ -21,6 +22,12 @@ import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
+
+# allow configure orca to send requests to remote server
+import plotly.io as pio
+
+pio._orca.ensure_server = lambda: None
+pio._orca.orca_state["port"] = 32909
 
 
 class ProcessIrradFile:
@@ -34,12 +41,113 @@ class ProcessIrradFile:
 
         # class variables
         self.file_name = "Lroot_calculated_irradiances.csv"
+        self.file_name_csv = f"{self.file_name.split('.')[0]}_data.csv"
         self.path_files_raw = "files/raw"
         self.path_files_csv = "files/csv"
+        self.path_images_plotly = "images/plotly"
         self.content = None
         self.df = pd.DataFrame()
         pd.options.mode.chained_assignment = None
         warnings.filterwarnings("ignore")
+
+    def calc_kfunctions(self, file_name="Lroot_calculated_irradiances.csv",
+                        path_file="files/raw"):
+        """
+        Join methods to calculate kfunctions
+
+        Parameters
+        ----------
+            file_name: str
+                Name of the file (Default="Lroot.txt")
+            path_file: str
+                Path of the file (Default="files/raw")
+        """
+        if file_name is None:
+            file_name = self.file_name
+        else:
+            self.file_name = file_name
+
+        self.open_file(file_name=file_name, path_file=path_file)
+        self.create_dataframe_from_Lroot_calc_irrad()
+        self.calculate_kfunctions()
+
+    def plot_kfunctions(self, file_name_csv=None, path_file_csv=None,
+                        is_shown=False, min_lambda=400, max_lambda=700,
+                        plotly=True,
+                        matplotlib=False,
+                        plot_irradiances=True,
+                        plot_kfunctionsLR=False,
+                        plot_calculated_Kd_LR_all_points=True,
+                        plot_calculated_Kd_HL=False):
+        """
+        Join methods to plot irradiances
+
+        Parameters
+        ----------
+            file_name_csv: str
+                Name of the csv file (Default=None)
+            path_file_csv: str
+                Path of the file (Default=None)
+            is_shown: Boolean
+                Flag to show the plot (Default=False)
+            min_lambda: int
+                Minimum lambda value to plot (Default=400)
+            max_lambda: int
+                Maximum lambda value to plot (Default=700)
+            plotly: Boolean
+                Boolean to plot with Plotly lib (Default=True)
+            matplotlib: Boolean
+                Boolean to plot with Plotly matplotlib (Default=False)
+            plot_irradiances: Boolean
+                Boolean to plot irradiances (Default=True)
+            plot_kfunctionsLR: Boolean
+                Boolean to plot plot_kfunctionsLR (Default=False)
+            plot_calculated_Kd_LR_all_points: Boolean
+                Boolean to plot plot_calculated_Kd_LR_all_points (Default=True)
+            plot_calculated_Kd_HL: Boolean
+                Boolean to plot plot_calculated_Kd_HL (Default=False)
+        """
+        if file_name_csv is None:
+            file_name_csv = self.file_name_csv
+        else:
+            self.file_name_csv = file_name_csv
+
+        if path_file_csv is None:
+            path_file_csv = self.path_files_csv
+        else:
+            self.path_files_csv = path_file_csv
+
+        self.open_file(file_name=file_name_csv, path_file=path_file_csv)
+        self.create_dataframe_from_Lroot_calc_kfunctions()
+
+        if plotly is True:
+
+            if plot_irradiances is True:
+                self.plot_irradiances_plotly(is_shown=is_shown)
+
+            if plot_kfunctionsLR is True:
+                self.plot_kfunctionsLR_plotly(is_shown=is_shown)
+
+            if plot_calculated_Kd_LR_all_points is True:
+                self.plot_calculated_Kd_LR_all_points_plotly(is_shown=is_shown)
+
+            if plot_calculated_Kd_HL is True:
+                self.plot_calculated_Kd_HL_plotly(is_shown=is_shown)
+
+        if matplotlib is True:
+
+            if plot_irradiances is True:
+                self.plot_irradiances_matplotlib(is_shown=is_shown)
+
+            if plot_kfunctionsLR is True:
+                self.plot_kfunctionsLR_matplotlib(is_shown=is_shown)
+
+            if plot_calculated_Kd_LR_all_points is True:
+                self.plot_calculated_Kd_LR_all_points_matplotlib(
+                    is_shown=is_shown)
+
+            if plot_calculated_Kd_HL is True:
+                self.plot_calculated_Kd_HL_matplotlib(is_shown=is_shown)
 
     def open_file(self, file_name=None, path_file=None):
         """
@@ -52,8 +160,12 @@ class ProcessIrradFile:
             path_file: str
                 Path of the file (Default=None)
         """
-        if file_name is None:
+        if (file_name is None) and (path_file is None):
             f = os.path.join(self.path_files_raw, self.file_name)
+        elif file_name is None:
+            f = os.path.join(path_file, self.file_name)
+        elif path_file is None:
+            f = os.path.join(self.path_files_raw, file_name)
         else:
             f = os.path.join(path_file, file_name)
         try:
@@ -207,21 +319,55 @@ class ProcessIrradFile:
             if not math.isnan(depth):
                 x.append(self.df['depth'].iloc[i])
 
-                log_y_kd.append(math.log(self.df['calculated_Ed'].iloc[i]))
-                log_y_ku.append(math.log(self.df['calculated_Eu'].iloc[i]))
-                log_y_kl1.append(math.log(self.df['calculated_El1_no_polar_cap'].iloc[i]))
-                log_y_kl2.append(math.log(self.df['calculated_El2_no_polar_cap'].iloc[i]))
-                log_y_kl1_polar_cap.append(math.log(self.df['calculated_El1_polar_cap'].iloc[i]))
-                log_y_kl2_polar_cap.append(math.log(self.df['calculated_El2_polar_cap'].iloc[i]))
-                log_y_khc.append(math.log(self.df['calculated_Ehc'].iloc[i]))
-                log_y_khc_45.append(math.log(self.df['calculated_Ehc_45'].iloc[i]))
+                try:
+                    log_y_kd.append(math.log(
+                        self.df['calculated_Ed'].iloc[i]))
+                except ValueError as er:
+                    log_y_kd.append(0)
+                try:
+                    log_y_ku.append(math.log(
+                        self.df['calculated_Eu'].iloc[i]))
+                except ValueError as er:
+                    log_y_ku.append(0)
+                try:
+                    log_y_kl1.append(math.log(
+                        self.df['calculated_El1_no_polar_cap'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl1.append(0)
+                try:
+                    log_y_kl2.append(math.log(
+                        self.df['calculated_El2_no_polar_cap'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl2.append(0)
+                try:
+                    log_y_kl1_polar_cap.append(math.log(
+                        self.df['calculated_El1_polar_cap'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl1_polar_cap.append(0)
+                try:
+                    log_y_kl2_polar_cap.append(math.log(
+                        self.df['calculated_El2_polar_cap'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl1_polar_cap.append(0)
+                try:
+                    log_y_khc.append(math.log(
+                        self.df['calculated_Ehc'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl1_polar_cap.append(0)
+                try:
+                    log_y_khc_45.append(math.log(
+                        self.df['calculated_Ehc_45'].iloc[i]))
+                except ValueError as er:
+                    log_y_kl1_polar_cap.append(0)
 
                 y_kd.append(self.df['calculated_Ed'].iloc[i])
                 y_ku.append(self.df['calculated_Eu'].iloc[i])
                 y_kl1.append(self.df['calculated_El1_no_polar_cap'].iloc[i])
                 y_kl2.append(self.df['calculated_El2_no_polar_cap'].iloc[i])
-                y_kl1_polar_cap.append(self.df['calculated_El1_polar_cap'].iloc[i])
-                y_kl2_polar_cap.append(self.df['calculated_El2_polar_cap'].iloc[i])
+                y_kl1_polar_cap.append(
+                    self.df['calculated_El1_polar_cap'].iloc[i])
+                y_kl2_polar_cap.append(
+                    self.df['calculated_El2_polar_cap'].iloc[i])
                 y_khc.append(self.df['calculated_Ehc'].iloc[i])
                 y_khc_45.append(self.df['calculated_Ehc_45'].iloc[i])
 
@@ -369,11 +515,15 @@ class ProcessIrradFile:
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
                     x[2:], log_y_kl1_polar_cap[2:])
                 if math.isnan(slope):
-                    self.df['calculated_Kl1_polar_cap_LR_all_points'].iloc[i] = 0
+                    self.df[
+                        'calculated_Kl1_polar_cap_LR_all_points'].iloc[i] = 0
                 else:
                     self.df[
-                        'calculated_Kl1_polar_cap_LR_all_points'].iloc[i] = slope*(-1)
-                self.df['r2value_Kl1_polar_cap_LR_all_points'].iloc[i] = r_value*r_value
+                        'calculated_Kl1_polar_cap_LR_all_points'
+                        ].iloc[i] = slope*(-1)
+                self.df[
+                    'r2value_Kl1_polar_cap_LR_all_points'
+                    ].iloc[i] = r_value*r_value
 
                 self.df['calculated_Kl1_polar_cap_HL'].iloc[i] = (
                     math.log(y_kl1_polar_cap[-1] / y_kl1_polar_cap[-2]) / (
@@ -403,11 +553,15 @@ class ProcessIrradFile:
                 slope, intercept, r_value, p_value, std_err = stats.linregress(
                     x[2:], log_y_kl2_polar_cap[2:])
                 if math.isnan(slope):
-                    self.df['calculated_Kl2_polar_cap_LR_all_points'].iloc[i] = 0
+                    self.df[
+                        'calculated_Kl2_polar_cap_LR_all_points'].iloc[i] = 0
                 else:
                     self.df[
-                        'calculated_Kl2_polar_cap_LR_all_points'].iloc[i] = slope*(-1)
-                self.df['r2value_Kl2_polar_cap_LR_all_points'].iloc[i] = r_value*r_value
+                        'calculated_Kl2_polar_cap_LR_all_points'
+                        ].iloc[i] = slope*(-1)
+                self.df[
+                    'r2value_Kl2_polar_cap_LR_all_points'
+                    ].iloc[i] = r_value*r_value
 
                 self.df['calculated_Kl2_polar_cap_HL'].iloc[i] = (
                     math.log(y_kl2_polar_cap[-1] / y_kl2_polar_cap[-2]) / (
@@ -475,7 +629,8 @@ class ProcessIrradFile:
                 else:
                     self.df[
                         'calculated_Khc_45_LR_all_points'].iloc[i] = slope*(-1)
-                self.df['r2value_Khc_45_LR_all_points'].iloc[i] = r_value*r_value
+                self.df[
+                    'r2value_Khc_45_LR_all_points'].iloc[i] = r_value*r_value
 
                 self.df['calculated_Khc_45_HL'].iloc[i] = (
                     math.log(y_khc_45[-1] / y_khc_45[-2]) / (
@@ -496,7 +651,7 @@ class ProcessIrradFile:
                 self.df['calculated_Khc_45_HL'].iloc[i] = 0
 
         # save as csv
-        fname = "Lroot_calculated_kfunctions.csv"
+        fname = f"{self.file_name.split('.')[0]}_calculated_kfunctions.csv"
         f = os.path.join(self.path_files_csv, fname)
         self.df.to_csv(f)
 
@@ -511,7 +666,7 @@ class ProcessIrradFile:
         print("\nComplete. ")
         print(f"Time calculating kfunctions: {(end - start)/60} minutes")
 
-    def _create_dataframe_from_Lroot_calc_kfunctions(self):
+    def create_dataframe_from_Lroot_calc_kfunctions(self):
         """
         Create dataframe from content file
         """
@@ -571,13 +726,13 @@ class ProcessIrradFile:
             B = 0.0
         return (R, G, B, A)
 
-    def plot_irradiances_matplotlib(self, has_show=False):
+    def plot_irradiances_matplotlib(self, is_shown=False):
         """
         Plot calculated Irradiances from .csv file in Matplotlib
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
         """
         mplstyle.use(['ggplot'])
@@ -650,16 +805,16 @@ class ProcessIrradFile:
             fname="images/matplotlib/calculated_irradiances.svg",
             )
 
-        if has_show is True:
+        if is_shown is True:
             plt.show()
 
-    def plot_irradiances_plotly(self, has_show=False):
+    def plot_irradiances_plotly(self, is_shown=False):
         """
         calculated Irradiances from .csv file in Plotly
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
@@ -669,8 +824,8 @@ class ProcessIrradFile:
             rows=4, cols=2,
             column_widths=[0.5, 0.5],
             row_heights=[0.25, 0.25, 0.25, 0.25],
-            subplot_titles=("calculated_Ed", 
-                            "calculated_Eu", 
+            subplot_titles=("calculated_Ed",
+                            "calculated_Eu",
                             "calculated_El1_no_polar_cap",
                             "calculated_El2_no_polar_cap",
                             "calculated_El1_polar_cap",
@@ -871,7 +1026,7 @@ class ProcessIrradFile:
         fig.update_layout(height=1920, width=1600)
 
         for i in fig['layout']['annotations']:
-            i['font'] = dict(size=12,color='#000000')
+            i['font'] = dict(size=12, color='#000000')
 
         """ fig.update_layout(
             updatemenus=[
@@ -905,24 +1060,26 @@ class ProcessIrradFile:
                     ]),
                 )
             ]) """
-        
 
-        if has_show is True:
+        if is_shown is True:
             fig.show(config={'showLink': True})
 
         if not os.path.exists("images/plotly"):
             os.mkdir("images/plotly")
-        # fig.write_image("images/plotly/calculated_irradiances.svg")
-        fig.write_html("images/plotly/calculated_irradiances.html")
 
-    def plot_kfunctionsLR_matplotlib(self, has_show=False):
+        fname = f"{self.file_name_csv.split('.')[0]}_calculated_irradiances"
+        f = os.path.join(self.path_images_plotly, fname)
+        fig.write_image(f"{f}.svg")
+        fig.write_html(f"{f}.html")
+
+    def plot_kfunctionsLR_matplotlib(self, is_shown=False):
         """
         Plot kfunctions calculated as Linear Regression
         from .csv file in Matplotlib
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
@@ -996,21 +1153,22 @@ class ProcessIrradFile:
             fname="images/matplotlib/calculated_kfunctions_LR.svg",
             )
 
-        if has_show is True:
+        if is_shown is True:
             plt.show()
 
-    def plot_kfunctionsLR_plotly(self, has_show=False):
+    def plot_kfunctionsLR_plotly(self, is_shown=False):
         """
         Plot kfunctions calculated as Linear Regression
         from .csv file in Plotly
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
-        # plot of calculated_Kfunctions for each lambda in function of depth in plotly
+        # plot of calculated_Kfunctions for each lambda in function of depth
+        # in plotly
         # Initialize figure with subplots
 
         fig = make_subplots(
@@ -1020,11 +1178,11 @@ class ProcessIrradFile:
             subplot_titles=(
                 "calculated_Kd_LR",
                 "calculated_Ku_LR",
-                "calculated_Kl1_no_polar_cap_LR", 
+                "calculated_Kl1_no_polar_cap_LR",
                 "calculated_Kl2_no_polar_cap_LR",
-                "calculated_Kl1_polar_cap_LR", 
+                "calculated_Kl1_polar_cap_LR",
                 "calculated_Kl2_polar_cap_LR",
-                "calculated_Khc_LR", 
+                "calculated_Khc_LR",
                 "calculated_Khc_45_LR"))
 
         for i, df in self.df.groupby(['lambda']):
@@ -1219,9 +1377,9 @@ class ProcessIrradFile:
         fig.update_layout(height=1920, width=1600)
 
         for i in fig['layout']['annotations']:
-            i['font'] = dict(size=12,color='#000000')
+            i['font'] = dict(size=12, color='#000000')
 
-        if has_show is True:
+        if is_shown is True:
             fig.show(config={'showLink': True})
 
         if not os.path.exists("images/plotly"):
@@ -1229,14 +1387,14 @@ class ProcessIrradFile:
         # fig.write_image("images/plotly/calculated_kfunctions_LR.svg")
         fig.write_html("images/plotly/calculated_kfunctions_LR.html")
 
-    def plot_calculated_Kd_LR_all_points_matplotlib(self, has_show=False):
+    def plot_calculated_Kd_LR_all_points_matplotlib(self, is_shown=False):
         """
         Plot kfunctions calculated as Linear Regression with all points
         from .csv file in Matplotlib
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
@@ -1314,21 +1472,35 @@ class ProcessIrradFile:
             fname="images/matplotlib/calculated_kfunctions_LR_all_points.svg",
             )
 
-        if has_show is True:
+        if is_shown is True:
             plt.show()
 
-    def plot_calculated_Kd_LR_all_points_plotly(self, has_show=False):
+    def plot_calculated_Kd_LR_all_points_plotly(self, min_lambda=400,
+                                                max_lambda=700,
+                                                is_shown=False):
         """
         Plot kfunctions calculated as Linear Regression with all points
         from .csv file in Plotly
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
+            min_lambda: int
+                Minimum lambda value to plot (Default=400)
+            max_lambda: int
+                Maximum lambda value to plot (Default=700)
 
         """
-        # plot of calculated_kfunctions for each lambda in function of depth in plotly
+        self.new_df = self.df.copy()
+
+        # filter dataframe lambda. By default:
+        # wavelength > 400 and wavelength < 700
+        self.new_df = self.df[(self.df['lambda'] > min_lambda) & (
+            self.df['lambda'] < max_lambda)]
+
+        # plot of calculated_kfunctions for each lambda in function of depth
+        # in plotly
         # Initialize figure with subplots
         fig = make_subplots(
             rows=4, cols=2,
@@ -1344,229 +1516,236 @@ class ProcessIrradFile:
                 "calculated_Khc_LR_all_points",
                 "calculated_Khc_45_LR_all_points"
                ))
-        depth = 9
-        lmbd_list = [460.0, 480.0, 500.0, 520.0, 540.0, 560.0,
-                     580.0, 600.0, 620.0, 640.0]
+        # to do
+        depth_list = self.new_df['depth'].unique()
+        depth_max, = np.where(depth_list == 2)
+        depth = int(depth_max)
 
         for i, df in self.df.groupby(['lambda']):
-            if float(i) in lmbd_list:
-                lmbda = f'lambda: {i}'
-                color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
 
-                # Add scatter plot of irradiances
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Kd_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        marker=dict(color=color),
-                        text=df['calculated_Kd_LR_all_points'].iloc[3:depth]),
-                    row=1, col=1
-                    )
+            lmbda = f'lambda: {i}'
+            color = "rgba" + str(self.wavelength_to_rgb(wavelength=i))
 
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Ku_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Ku_LR_all_points'].iloc[3:depth]),
-                    row=1, col=2
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Kl1_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Kl1_LR_all_points'].iloc[3:depth]),
-                    row=2, col=1
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Kl2_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Kl2_LR_all_points'].iloc[3:depth]),
-                    row=2, col=2
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Kl1_polar_cap_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Kl1_polar_cap_LR_all_points'].iloc[3:depth]),
-                    row=3, col=1
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Kl2_polar_cap_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Kl2_polar_cap_LR_all_points'].iloc[3:depth]),
-                    row=3, col=2
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Khc_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Khc_LR_all_points'].iloc[3:depth]),
-                    row=4, col=1
-                    )
-
-                fig.add_trace(
-                    go.Scatter(
-                        x=df['calculated_Khc_45_LR_all_points'].iloc[3:depth],
-                        y=df['depth'].iloc[3:depth],
-                        mode="lines",
-                        legendgroup="group " + str(lmbda),
-                        name=lmbda,
-                        showlegend=False,
-                        marker=dict(color=color),
-                        text=df['calculated_Khc_45_LR_all_points'].iloc[3:depth]),
-                    row=4, col=2
-                    )
-
-            # Update xaxis properties
-            range_xaxis = [0,0.5]
-            fig.update_xaxes(
-                title_text="calculated kfunction Kd (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=1, col=1)
-            fig.update_xaxes(
-                title_text="calculated kfunction Ku (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=1, col=2)
-            fig.update_xaxes(
-                title_text="calculated kfunction Kl1 (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=2, col=1)
-            fig.update_xaxes(
-                title_text="calculated kfunction Kl2 (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=2, col=2)
-            fig.update_xaxes(
-                title_text="calculated kfunction Kl1 polar cap (1/meter))",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=3, col=1)
-            fig.update_xaxes(
-                title_text="calculated kfunction Kl2 polar cap (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=3, col=2)
-            fig.update_xaxes(
-                title_text="calculated kfunction Khc (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=4, col=1)
-            fig.update_xaxes(
-                title_text="calculated kfunction Khc 45 (1/meter)",
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                range=range_xaxis,
-                row=4, col=2)
-
-            # Update yaxis properties
-            fig.update_yaxes(
-                title_text='depth (m)',
-                title_font=dict(size=12),
-                ticklen=5,
-                zeroline=False,
-                autorange='reversed')
-
-            # Update title and height
-            fig.update_layout(
-                title_text="<b>Calculated kfunctions LR all points</b>",
-                title_font=dict(size=16),
-                title=dict(
-                    y=0.97,
-                    x=0.5,
-                    xanchor='center',
-                    yanchor="top"),
-                legend_title='<b> Wavelength </b>',
-                legend=dict(
-                    traceorder="normal",
-                    y=1,
-                    x=1.1,
-                    yanchor="top",
-                    font=dict(
-                        family="sans-serif",
-                        size=9,
-                        color="black"
-                    ),
+            # Add scatter plot of irradiances
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kd_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    marker=dict(color=color),
+                    text=df['calculated_Kd_LR_all_points'].iloc[3:depth]),
+                row=1, col=1
                 )
-            )
 
-            fig.update_layout(height=1920, width=1600)
-        
-        if has_show is True:
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Ku_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Ku_LR_all_points'].iloc[3:depth]),
+                row=1, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl1_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl1_LR_all_points'].iloc[3:depth]),
+                row=2, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl2_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl2_LR_all_points'].iloc[3:depth]),
+                row=2, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl1_polar_cap_LR_all_points'].iloc[
+                        3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl1_polar_cap_LR_all_points'].iloc[
+                        3:depth]),
+                row=3, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Kl2_polar_cap_LR_all_points'].iloc[
+                        3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Kl2_polar_cap_LR_all_points'].iloc[
+                        3:depth]),
+                row=3, col=2
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Khc_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Khc_LR_all_points'].iloc[3:depth]),
+                row=4, col=1
+                )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df['calculated_Khc_45_LR_all_points'].iloc[3:depth],
+                    y=df['depth'].iloc[3:depth],
+                    mode="lines",
+                    legendgroup="group " + str(lmbda),
+                    name=lmbda,
+                    showlegend=False,
+                    marker=dict(color=color),
+                    text=df['calculated_Khc_45_LR_all_points'].iloc[3:depth]),
+                row=4, col=2
+                )
+
+        # Update xaxis properties
+        range_xaxis = [0, 0.5]
+        fig.update_xaxes(
+            title_text="calculated kfunction Kd (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=1, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Ku (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=1, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl1 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=2, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl2 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=2, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl1 polar cap (1/meter))",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=3, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Kl2 polar cap (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=3, col=2)
+        fig.update_xaxes(
+            title_text="calculated kfunction Khc (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=4, col=1)
+        fig.update_xaxes(
+            title_text="calculated kfunction Khc 45 (1/meter)",
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            range=range_xaxis,
+            row=4, col=2)
+
+        # Update yaxis properties
+        fig.update_yaxes(
+            title_text='depth (m)',
+            title_font=dict(size=12),
+            ticklen=5,
+            zeroline=False,
+            autorange='reversed')
+
+        # Update title and height
+        fig.update_layout(
+            title_text="<b>Calculated kfunctions LR all points</b>",
+            title_font=dict(size=16),
+            title=dict(
+                y=0.97,
+                x=0.5,
+                xanchor='center',
+                yanchor="top"),
+            legend_title='<b> Wavelength </b>',
+            legend=dict(
+                traceorder="normal",
+                y=1,
+                x=1.1,
+                yanchor="top",
+                font=dict(
+                    family="sans-serif",
+                    size=9,
+                    color="black"
+                ),
+            )
+        )
+
+        fig.update_layout(height=1920, width=1600)
+
+        if is_shown is True:
             fig.show(config={'showLink': True})
 
         if not os.path.exists("images/plotly"):
             os.mkdir("images/plotly")
-        """ fig.write_image(
-            "images/plotly/calculated_kfunctions_LR_all_points.svg") """
-        fig.write_html(
-            "images/plotly/calculated_kfunctions_LR_all_points.html")
 
-    def plot_calculated_Kd_HL_matplotlib(self, has_show=False):
+        fcsv = self.file_name_csv
+        fname = f"{fcsv.split('.')[0]}_calculated_kfunctions_LR_all_points"
+        f = os.path.join(self.path_images_plotly, fname)
+        fig.write_image(f"{f}.svg")
+        fig.write_html(f"{f}.html")
+
+    def plot_calculated_Kd_HL_matplotlib(self, is_shown=False):
         """
         Plot kfunctions calculated as Hydrolight
         from .csv file in Matplotlib
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
@@ -1640,17 +1819,17 @@ class ProcessIrradFile:
             fname="images/matplotlib/calculated_kfunctions_HL.svg",
             )
 
-        if has_show is True:
+        if is_shown is True:
             plt.show()
 
-    def plot_calculated_Kd_HL_plotly(self, has_show=False):
+    def plot_calculated_Kd_HL_plotly(self, is_shown=False):
         """
         Plot kfunctions calculated as Linear Regression with all points
         from .csv file in Plotly
 
         Parameters
         ----------
-            has_show: Boolean
+            is_shown: Boolean
                 Flag to show the plot. By default, False.
 
         """
@@ -1778,7 +1957,7 @@ class ProcessIrradFile:
             )
         )
 
-        if has_show is True:
+        if is_shown is True:
             fig.show(config={'showLink': True})
 
         if not os.path.exists("images/plotly"):
@@ -1792,32 +1971,3 @@ class ProcessIrradFile:
             sys.stdout.write('\r'+f'{process_name} - Loading...'+char)
             time.sleep(.1)
             sys.stdout.flush()
-
-
-if __name__ == "__main__":
-
-    prf = ProcessIrradFile()
-    """ prf.open_file()
-    prf.create_dataframe_from_Lroot_calc_irrad()
-    prf.calculate_kfunctions() """
-
-    # Flag to show or hide plot
-    has_show = False
-
-    prf.open_file(
-        file_name="Lroot_calculated_kfunctions.csv",
-        path_file="files/csv")
-    prf._create_dataframe_from_Lroot_calc_kfunctions()
-
-    # prf.plot_irradiances_matplotlib(has_show=has_show)
-    # prf.plot_irradiances_plotly(has_show=has_show)
-
-    # prf.plot_kfunctionsLR_matplotlib(has_show=has_show)
-    # prf.plot_kfunctionsLR_plotly(has_show=has_show)
-
-    # prf.plot_calculated_Kd_LR_all_points_matplotlib(has_show=has_show)
-    prf.plot_calculated_Kd_LR_all_points_plotly(has_show=has_show)
-
-    # prf.plot_calculated_Kd_HL_matplotlib(has_show=has_show)
-    # to do
-    # prf.plot_calculated_Kd_HL_plotly(has_show=has_show)

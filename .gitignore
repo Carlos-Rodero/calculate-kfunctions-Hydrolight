@@ -1,8 +1,9 @@
-files/raw/Lroot_calculated_irradiances.csv
+files/raw/*.csv
 files/raw/backup
-files/csv/Lroot_calculated_kfunctions.csv
+files/csv/*.csv
 images/plotly/*
 images/matplotlib/*
 images/backup
 env
 .*
+__pycache__
